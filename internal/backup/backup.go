@@ -344,6 +344,7 @@ func (u *Utility) AnalyzeDirectory() error {
 	
 	u.logger.Info("Copying files", "target", targetDir)
 	
+	filesCopied := 0
 	err = filepath.WalkDir(u.config.SourceDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -380,11 +381,31 @@ func (u *Utility) AnalyzeDirectory() error {
 		} else {
 			// Copy file
 			u.stats.TotalFiles++
+			filesCopied++
 			
 			info, err := d.Info()
 			if err != nil {
 				return err
 			}
+			
+			u.stats.TotalSize += info.Size()
+			u.stats.CopiedFiles++
+			u.stats.CopiedSize += info.Size()
+			
+			// Log progress every 100 files
+			if filesCopied%100 == 0 {
+				u.logger.Info("Copy progress", 
+					"copied", filesCopied, 
+					"current", relPath,
+					"size_mb", float64(u.stats.CopiedSize)/(1024*1024))
+			}
+			
+			if err := u.copyFile(path, destPath); err != nil {
+				u.logger.Error("Failed to copy file", "src", path, "dst", destPath, "error", err)
+				return err
+			}
+			
+			return nil u.stats.TotalFiles, len(preManifest)))
 			
 			u.stats.TotalSize += info.Size()
 			u.stats.CopiedFiles++
@@ -459,6 +480,17 @@ func (u *Utility) PerformBackup() error {
 		return fmt.Errorf("failed to analyze directory: %w", err)
 	}
 	
+	// Perform post-backup verification if hashes are enabled
+	if u.config.EnableHashVerification {
+		u.logger.Info("Starting post-backup verification")
+		if err := u.performPostBackupVerification(); err != nil {
+			u.logger.Warn("Post-backup verification encountered issues", "error", err)
+			// Don't fail the backup, just warn
+		} else {
+			u.logger.Info("Post-backup verification completed successfully")
+		}
+	}
+	
 	// Save configuration
 	configPath := filepath.Join(u.backupPath, "backup_config.json")
 	configFile, err := os.Create(configPath)
@@ -471,6 +503,11 @@ func (u *Utility) PerformBackup() error {
 	encoder.SetIndent("", "  ")
 	if err := encoder.Encode(u.config); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
+	}
+	
+	// Generate backup summary report
+	if err := u.generateBackupSummary(); err != nil {
+		u.logger.Warn("Failed to generate backup summary", "error", err)
 	}
 	
 	return nil
