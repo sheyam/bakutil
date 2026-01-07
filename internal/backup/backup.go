@@ -16,6 +16,9 @@ import (
 	"bakutil/pkg/logger"
 )
 
+// Type aliases for convenience
+type FileManifest = types.FileManifest
+
 // Utility represents the main backup utility
 type Utility struct {
 	config     *config.Config
@@ -263,4 +266,212 @@ func LoadManifest(manifestPath string) (types.FileManifest, error) {
 	}
 	
 	return manifest, nil
+}
+
+// ValidateBackup performs backup validation using the validation engine
+func (u *Utility) ValidateBackup(backupPath string) (*types.VerificationResult, error) {
+	// Use the ValidateBackupFix utility for validation
+	validator := NewValidateBackupFix(u.logger)
+	
+	// Try to determine source directory from config or backup directory
+	sourceDir := u.config.SourceDir
+	if sourceDir == "" {
+		// Try to infer from backup directory structure
+		entries, err := os.ReadDir(backupPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read backup directory: %w", err)
+		}
+		
+		// Look for a subdirectory that might be the backed up source
+		for _, entry := range entries {
+			if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+				sourceDir = filepath.Join(backupPath, entry.Name())
+				break
+			}
+		}
+		
+		if sourceDir == "" {
+			return nil, fmt.Errorf("could not determine source directory from backup")
+		}
+	}
+	
+	result, err := validator.ValidateBackup(backupPath, sourceDir)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Convert ValidationResult to VerificationResult
+	issues := []string{}
+	issues = append(issues, result.MissingFiles...)
+	issues = append(issues, result.CorruptedFiles...)
+	issues = append(issues, result.SizeProblems...)
+	issues = append(issues, result.HashProblems...)
+	issues = append(issues, result.PermissionIssues...)
+	
+	verifyResult := &types.VerificationResult{
+		Success:    result.IsValid,
+		TotalFiles: result.TotalFiles,
+		Issues:     issues,
+		ReportPath: filepath.Join(backupPath, "validation_report.txt"),
+	}
+	
+	return verifyResult, nil
+}
+
+// AnalyzeDirectory analyzes the source directory and performs the backup
+func (u *Utility) AnalyzeDirectory() error {
+	u.logger.Info("Analyzing directory structure", "source", u.config.SourceDir)
+	
+	u.stats.StartTime = time.Now()
+	
+	// Generate pre-backup manifest
+	u.logger.Info("Generating pre-backup manifest")
+	preManifest, err := u.GenerateFileManifest(u.config.SourceDir, u.config.EnableHashVerification)
+	if err != nil {
+		return fmt.Errorf("failed to generate pre-backup manifest: %w", err)
+	}
+	
+	// Save pre-backup manifest
+	if err := u.SaveManifest(preManifest, "pre_backup_manifest.json"); err != nil {
+		return fmt.Errorf("failed to save pre-backup manifest: %w", err)
+	}
+	
+	// Perform the actual backup (copy files)
+	targetDir := filepath.Join(u.backupPath, filepath.Base(u.config.SourceDir))
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("failed to create target directory: %w", err)
+	}
+	
+	u.logger.Info("Copying files", "target", targetDir)
+	
+	err = filepath.WalkDir(u.config.SourceDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				u.stats.BrokenSymlinks++
+				return nil
+			}
+			if os.IsPermission(err) {
+				u.stats.PermissionErrors++
+				return nil
+			}
+			return err
+		}
+		
+		// Skip if should be ignored
+		if u.ShouldIgnore(path, u.config.SourceDir) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		
+		// Calculate relative path
+		relPath, err := filepath.Rel(u.config.SourceDir, path)
+		if err != nil {
+			return err
+		}
+		
+		destPath := filepath.Join(targetDir, relPath)
+		
+		if d.IsDir() {
+			// Create directory
+			u.stats.TotalFolders++
+			return os.MkdirAll(destPath, d.Type().Perm())
+		} else {
+			// Copy file
+			u.stats.TotalFiles++
+			
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			
+			u.stats.TotalSize += info.Size()
+			u.stats.CopiedFiles++
+			u.stats.CopiedSize += info.Size()
+			
+			return u.copyFile(path, destPath)
+		}
+	})
+	
+	if err != nil {
+		return fmt.Errorf("backup failed: %w", err)
+	}
+	
+	u.stats.EndTime = time.Now()
+	u.logger.Info("Backup analysis completed", 
+		"files", u.stats.TotalFiles,
+		"directories", u.stats.TotalFolders,
+		"size", u.stats.TotalSize)
+	
+	return nil
+}
+
+// copyFile copies a single file from source to destination
+func (u *Utility) copyFile(src, dst string) error {
+	// Create destination directory if needed
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	
+	// Open source file
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+	
+	// Create destination file
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+	
+	// Copy contents
+	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return err
+	}
+	
+	// Copy file permissions and timestamps
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+	
+	if err := os.Chmod(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+	
+	return os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
+}
+
+// PerformBackup performs the complete backup process
+func (u *Utility) PerformBackup() error {
+	// Setup backup directory
+	if err := u.SetupBackupDirectory(); err != nil {
+		return fmt.Errorf("failed to setup backup directory: %w", err)
+	}
+	
+	// Analyze directory and perform backup
+	if err := u.AnalyzeDirectory(); err != nil {
+		return fmt.Errorf("failed to analyze directory: %w", err)
+	}
+	
+	// Save configuration
+	configPath := filepath.Join(u.backupPath, "backup_config.json")
+	configFile, err := os.Create(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+	defer configFile.Close()
+	
+	encoder := json.NewEncoder(configFile)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(u.config); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	
+	return nil
 }

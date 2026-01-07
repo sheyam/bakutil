@@ -1,0 +1,15 @@
+{
+  "IgnorePatterns": [
+    "*.tmp",
+    ".DS_Store"
+  ],
+  "AlwaysInclude": [
+    "*.txt"
+  ],
+  "LargeFileThresholdMB": 100,
+  "UseRsync": true,
+  "EnableResume": true,
+  "EnableHashVerification": true,
+  "SourceDir": "./test-source",
+  "DestinationDir": "/Users/sselvaraj/bakutil/test-dest"
+}

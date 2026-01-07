@@ -1,0 +1,8 @@
+source_dir: "./test-source"
+destination_dir: "./test-dest"
+enable_hash_verification: true
+ignore_patterns:
+  - "*.tmp"
+  - ".DS_Store"
+always_include:
+  - "*.txt"

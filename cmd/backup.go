@@ -60,9 +60,9 @@ func runBackup(cmd *cobra.Command, args []string) error {
 	// Create backup utility
 	util := backup.NewUtility(cfg, log)
 	
-	// Setup backup directory
-	if err := util.SetupBackupDirectory(); err != nil {
-		return fmt.Errorf("failed to setup backup directory: %w", err)
+	// Perform complete backup
+	if err := util.PerformBackup(); err != nil {
+		return fmt.Errorf("backup failed: %w", err)
 	}
 	
 	log.Info("Backup completed successfully", "backupPath", util.GetBackupPath())
