@@ -18,11 +18,11 @@ A production-ready backup utility written in Go with intelligent file management
 ### Installation
 
 #### Download Pre-built Binary
-Download the latest release for your platform from the [Releases page](https://github.com/YOUR_USERNAME/bakutil/releases).
+Download the latest release for your platform from the [Releases page](https://github.com/sheyam/bakutil/releases).
 
 #### Build from Source
 ```bash
-git clone https://github.com/YOUR_USERNAME/bakutil.git
+git clone https://github.com/sheyam/bakutil.git
 cd bakutil
 make build
 ```
