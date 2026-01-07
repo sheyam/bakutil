@@ -161,13 +161,16 @@ jobs:
           CHANGES=$(git log --oneline --pretty=format:"- %s" HEAD~5..HEAD | head -5)
         fi
         
-        TAG_MESSAGE="Release $NEW_VERSION
+        TAG_MESSAGE=$(cat <<EOF
+Release $NEW_VERSION
 
 Automated release with recent changes:
 $CHANGES
 
 Build: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-Commit: ${GITHUB_SHA:0:7}"
+Commit: ${GITHUB_SHA:0:7}
+EOF
+)
         
         # Configure git
         git config user.name "github-actions[bot]"
