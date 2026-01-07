@@ -1,8 +1,17 @@
-# bakutil
+# Bakutil - Professional Backup Utility
 
-A production-ready backup utility written in Go with intelligent file management and verification capabilities.
+A production-ready backup utility with intelligent exclusions, hash verification, and comprehensive reporting.
 
 ## Features
+
+- **Smart Backup**: Intelligent file exclusions and always-include patterns
+- **Hash Verification**: SHA256 integrity checking for backup validation  
+- **Detailed Progress**: Real-time logging with file-level progress reporting
+- **Post-Backup Verification**: Automatic integrity verification after backup completion
+- **Comprehensive Reports**: Generated manifests, verification reports, and backup summaries
+- **Professional CLI**: Modern command-line interface with backup, verify, and validate commands
+
+## Quick Start
 
 - 🔄 **Intelligent Exclusions**: Automatically excludes cache directories, build artifacts, and unnecessary files
 - ⚡ **High Performance**: Uses rsync when available, Go native copy as fallback
