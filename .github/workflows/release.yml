@@ -25,6 +25,20 @@ jobs:
       id: version
       run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+    - name: Run tests before build
+      run: |
+        echo "Running tests to ensure enhanced features work..."
+        go test -v ./...
+        
+    - name: Verify enhanced features
+      run: |
+        echo "Verifying enhanced backup functionality is present..."
+        grep -r "performPostBackupVerification\|generateBackupSummary" internal/backup/ || {
+          echo "ERROR: Enhanced backup features not found!"
+          exit 1
+        }
+        echo "✅ Enhanced features verified"
+
     - name: Build binaries
       run: |
         mkdir -p build
@@ -52,7 +66,25 @@ jobs:
             -ldflags="-X 'main.version=${{ steps.version.outputs.VERSION }}' -X 'main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)' -X 'main.gitCommit=${GITHUB_SHA}'" \
             -o "build/${output_name}" \
             main.go
+          
+          # Verify the binary was created
+          if [ ! -f "build/${output_name}" ]; then
+            echo "ERROR: Failed to build ${output_name}"
+            exit 1
+          fi
+          
+          echo "✅ Successfully built ${output_name}"
         done
+
+    - name: Test binary functionality
+      run: |
+        echo "Testing built binary functionality..."
+        chmod +x build/backup-util-${{ steps.version.outputs.VERSION }}-linux-amd64
+        ./build/backup-util-${{ steps.version.outputs.VERSION }}-linux-amd64 --help | grep -E "(backup|verify|validate)" || {
+          echo "ERROR: Binary missing expected commands!"
+          exit 1
+        }
+        echo "✅ Binary functionality verified"
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
