@@ -113,4 +113,4 @@ make build-all
 
 ## License
 
-[Add your license here]
+MIT
