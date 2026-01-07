@@ -47,11 +47,15 @@ func init() {
 	// Verify command
 	verifyCmd.Flags().StringVarP(&sourceDir, "source", "s", "", "Source directory that was backed up (required)")
 	verifyCmd.Flags().BoolVar(&generateHashes, "hashes", false, "Generate hashes for verification")
-	verifyCmd.MarkFlagRequired("source")
+	if err := verifyCmd.MarkFlagRequired("source"); err != nil {
+		panic(err)
+	}
 	
 	// Validate command  
 	validateCmd.Flags().StringVarP(&sourceDir, "source", "s", "", "Source directory that was backed up (required)")
-	validateCmd.MarkFlagRequired("source")
+	if err := validateCmd.MarkFlagRequired("source"); err != nil {
+		panic(err)
+	}
 	
 	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(validateCmd)

@@ -23,7 +23,9 @@ var (
 func init() {
 	rootCmd.AddCommand(backupCmd)
 	backupCmd.Flags().StringVarP(&destination, "destination", "d", "", "destination directory for backup")
-	backupCmd.MarkFlagRequired("destination")
+	if err := backupCmd.MarkFlagRequired("destination"); err != nil {
+		panic(err)
+	}
 }
 
 func runBackup(cmd *cobra.Command, args []string) error {
