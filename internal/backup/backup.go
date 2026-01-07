@@ -388,30 +388,21 @@ func (u *Utility) AnalyzeDirectory() error {
 				return err
 			}
 			
+			u.logger.Info("Copying file", 
+				"file", relPath, 
+				"size", info.Size(),
+				"progress", fmt.Sprintf("%d files", u.stats.TotalFiles))
+			
 			u.stats.TotalSize += info.Size()
 			u.stats.CopiedFiles++
 			u.stats.CopiedSize += info.Size()
-			
-			// Log progress every 100 files
-			if filesCopied%100 == 0 {
-				u.logger.Info("Copy progress", 
-					"copied", filesCopied, 
-					"current", relPath,
-					"size_mb", float64(u.stats.CopiedSize)/(1024*1024))
-			}
 			
 			if err := u.copyFile(path, destPath); err != nil {
 				u.logger.Error("Failed to copy file", "src", path, "dst", destPath, "error", err)
 				return err
 			}
 			
-			return nil u.stats.TotalFiles, len(preManifest)))
-			
-			u.stats.TotalSize += info.Size()
-			u.stats.CopiedFiles++
-			u.stats.CopiedSize += info.Size()
-			
-			return u.copyFile(path, destPath)
+			return nil
 		}
 	})
 	
@@ -466,6 +457,110 @@ func (u *Utility) copyFile(src, dst string) error {
 	}
 	
 	return os.Chtimes(dst, srcInfo.ModTime(), srcInfo.ModTime())
+}
+
+// performPostBackupVerification performs verification immediately after backup
+func (u *Utility) performPostBackupVerification() error {
+	targetDir := filepath.Join(u.backupPath, filepath.Base(u.config.SourceDir))
+	
+	u.logger.Info("Generating post-backup manifest for verification")
+	postManifest, err := u.GenerateFileManifest(targetDir, u.config.EnableHashVerification)
+	if err != nil {
+		return fmt.Errorf("failed to generate post-backup manifest: %w", err)
+	}
+	
+	// Save post-backup manifest
+	if err := u.SaveManifest(postManifest, "post_backup_manifest.json"); err != nil {
+		return fmt.Errorf("failed to save post-backup manifest: %w", err)
+	}
+	
+	// Load pre-backup manifest for comparison
+	preManifestPath := filepath.Join(u.backupPath, "pre_backup_manifest.json")
+	preManifest, err := LoadManifest(preManifestPath)
+	if err != nil {
+		return fmt.Errorf("failed to load pre-backup manifest: %w", err)
+	}
+	
+	// Compare manifests and log results
+	ve := NewVerificationEngine(u)
+	comparison := ve.CompareManifests(preManifest, postManifest)
+	
+	u.logger.Info("Backup verification results",
+		"identical_files", comparison.IdenticalFiles,
+		"missing_files", len(comparison.MissingFiles),
+		"modified_files", len(comparison.ModifiedFiles),
+		"new_files", len(comparison.NewFiles))
+	
+	// Log any issues found
+	for _, missing := range comparison.MissingFiles {
+		u.logger.Warn("File missing from backup", "file", missing)
+	}
+	
+	for _, modified := range comparison.ModifiedFiles {
+		u.logger.Warn("File hash mismatch", 
+			"file", modified.Path,
+			"reason", modified.Reason,
+			"original_hash", modified.OldHash,
+			"backup_hash", modified.NewHash)
+	}
+	
+	// Generate verification report
+	if err := ve.GenerateVerificationReport(preManifest, postManifest, comparison); err != nil {
+		return fmt.Errorf("failed to generate verification report: %w", err)
+	}
+	
+	return nil
+}
+
+// generateBackupSummary generates a comprehensive backup summary report
+func (u *Utility) generateBackupSummary() error {
+	summaryPath := filepath.Join(u.backupPath, "backup_summary.txt")
+	
+	file, err := os.Create(summaryPath)
+	if err != nil {
+		return fmt.Errorf("failed to create summary file: %w", err)
+	}
+	defer file.Close()
+	
+	duration := u.stats.EndTime.Sub(u.stats.StartTime)
+	
+	fmt.Fprintf(file, "============================================================\n")
+	fmt.Fprintf(file, "BACKUP SUMMARY REPORT\n")
+	fmt.Fprintf(file, "============================================================\n\n")
+	fmt.Fprintf(file, "Backup Date: %s\n", u.stats.StartTime.Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(file, "Duration: %v\n\n", duration)
+	
+	fmt.Fprintf(file, "SOURCE:\n")
+	fmt.Fprintf(file, "Source Directory: %s\n", u.config.SourceDir)
+	fmt.Fprintf(file, "Destination: %s\n\n", u.backupPath)
+	
+	fmt.Fprintf(file, "STATISTICS:\n")
+	fmt.Fprintf(file, "Total Files: %d\n", u.stats.TotalFiles)
+	fmt.Fprintf(file, "Total Directories: %d\n", u.stats.TotalFolders)
+	fmt.Fprintf(file, "Total Size: %d bytes (%.2f MB)\n", u.stats.TotalSize, float64(u.stats.TotalSize)/1024/1024)
+	fmt.Fprintf(file, "Files Copied: %d\n", u.stats.CopiedFiles)
+	fmt.Fprintf(file, "Size Copied: %d bytes (%.2f MB)\n", u.stats.CopiedSize, float64(u.stats.CopiedSize)/1024/1024)
+	
+	if u.stats.BrokenSymlinks > 0 {
+		fmt.Fprintf(file, "Broken Symlinks: %d\n", u.stats.BrokenSymlinks)
+	}
+	if u.stats.PermissionErrors > 0 {
+		fmt.Fprintf(file, "Permission Errors: %d\n", u.stats.PermissionErrors)
+	}
+	
+	fmt.Fprintf(file, "\nCONFIGURATION:\n")
+	fmt.Fprintf(file, "Hash Verification: %v\n", u.config.EnableHashVerification)
+	fmt.Fprintf(file, "Ignore Patterns: %v\n", u.config.IgnorePatterns)
+	
+	if duration > 0 {
+		throughput := float64(u.stats.CopiedSize) / duration.Seconds()
+		fmt.Fprintf(file, "\nPERFORMANCE:\n")
+		fmt.Fprintf(file, "Throughput: %.2f MB/s\n", throughput/1024/1024)
+		fmt.Fprintf(file, "Files per second: %.2f\n", float64(u.stats.CopiedFiles)/duration.Seconds())
+	}
+	
+	u.logger.Info("Backup summary generated", "path", summaryPath)
+	return nil
 }
 
 // PerformBackup performs the complete backup process
